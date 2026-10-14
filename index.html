@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Holiday &amp; Long-Weekend Planner</title>
+<style>
+:root{--fg:#1b2733;--mut:#5b6b7a;--line:#dbe3ea;--acc:#0f766e;--hol:#f59e0b;--we:#eef2f6}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,"Segoe UI",Arial,sans-serif;color:var(--fg);background:#fff;line-height:1.45}
+header,main,footer{max-width:1100px;margin:0 auto;padding:14px 16px}
+h1{font-size:1.5rem;margin:0}.sub{color:var(--mut);margin:.2rem 0 0}
+form{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:6px 0 10px}
+label{display:flex;flex-direction:column;font-size:.85rem;color:var(--mut);gap:4px}
+select,input,button{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+button[type=submit]{background:var(--acc);color:#fff;border-color:var(--acc);cursor:pointer}
+#status{color:var(--mut);min-height:1.4em}
+.legend span{display:inline-block;padding:2px 8px;border-radius:4px;margin-right:6px;font-size:.8rem}
+#cal{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px;margin:14px 0}
+.month{border:1px solid var(--line);border-radius:10px;padding:8px}
+.month h3{margin:0 0 6px;font-size:.95rem}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;font-size:.78rem}
+.days span{padding:4px 0;border-radius:4px}
+.dow{color:var(--mut);font-weight:600}
+.we{background:var(--we)}.hol{background:var(--hol);color:#1b1300;font-weight:700}
+.win{outline:2px solid var(--acc)}.lv{background:var(--acc);color:#fff;font-weight:700}
+#plans{padding-left:0;list-style:none}#plans li{margin:6px 0}
+#plans button.rb{display:flex;align-items:center;gap:14px;width:100%;padding:8px 12px}
+.lab{min-width:120px;font-weight:600}.lab small{display:block;font-weight:400;color:var(--mut)}
+.strip{display:flex;gap:3px;flex:1;flex-wrap:wrap}
+.rd{width:34px;padding:3px 0;border-radius:6px;text-align:center;font-size:.72rem;line-height:1.15;border:1px solid var(--line)}
+.rd.hol{background:var(--hol);color:#1b1300;border-color:transparent}.rd.lv{background:var(--acc);color:#fff;border-color:transparent}
+.rd.we{background:#9fe1cb;border-color:transparent}.rd.ctx{color:var(--mut)}
+.sc{text-align:center;font-weight:700;min-width:60px}.sc small{display:block;font-weight:400;font-size:.65rem;color:var(--mut)}
+#trip{border:1px solid var(--line);border-radius:10px;padding:4px 14px 10px;margin:14px 0}
+#plans button{text-align:left;cursor:pointer}
+#plans button.on{border-color:var(--acc);background:#e6f6f3}
+#chk{margin:.4rem 0}#chk small{display:block;color:var(--mut)}
+.badge{display:inline-block;padding:1px 10px;border-radius:999px;font-weight:700;color:#fff}
+.badge.tight{background:#b91c1c}.badge.ok{background:#b45309}.badge.loose{background:#15803d}
+canvas{max-width:100%;border:1px solid var(--line);border-radius:10px}
+footer{color:var(--mut);font-size:.8rem}
+</style>
+</head>
+<body>
+<header>
+  <h1>Holiday &amp; Long-Weekend Planner</h1>
+  <p class="sub">Pick a country and how many leave days you can spend. The app finds the longest breaks.</p>
+</header>
+<main>
+  <form id="f">
+    <label>Country <select id="cc"></select></label>
+    <label>Year <select id="yr"></select></label>
+    <label>Leave days to use <input id="k" type="number" min="0" max="10" value="2" style="width:90px"></label>
+    <button type="submit">Plan</button>
+  </form>
+  <div id="status" role="status"></div>
+  <p class="legend"><span class="we">Weekend</span><span class="hol">Public holiday</span><span class="lv">Suggested leave day</span><span class="win">Selected break</span></p>
+  <h2>Best breaks</h2>
+  <ol id="plans"></ol>
+  <section id="trip" hidden>
+    <h2>Plan this break</h2>
+    <form id="tf">
+      <label>Budget per day <input id="bd" type="number" min="0" value="100" style="width:110px"></label>
+      <label>Your currency <select id="c1"></select></label>
+      <label>Show in <select id="c2"></select></label>
+      <label>Destination <select id="dest"></select></label>
+      <label>Baseline cost per day (USD) <input id="base" type="number" min="1" value="60" style="width:110px"></label>
+    </form>
+    <p id="tot"></p>
+    <p id="chk" role="status"></p>
+    <p><button type="button" id="ics">Add to calendar (.ics)</button> <button type="button" id="sh">Copy share link</button></p>
+  </section>
+  <div id="cal"></div>
+  <h2>Holidays per month</h2>
+  <canvas id="chart" width="640" height="160" aria-label="Public holidays per month"></canvas>
+</main>
+<footer>Holiday data: Nager.Date (date.nager.at). Currency: Frankfurter. Price level: World Bank (PA.NUS.PPP / PA.NUS.FCRF). Holiday lists can differ by region; check official sources before booking travel.</footer>
+<script>
+const $ = id => document.getElementById(id);
+const API = 'https://date.nager.at/api/v3/';
+const FALLBACK = [['KR','South Korea'],['ID','Indonesia'],['US','United States'],['JP','Japan'],['GB','United Kingdom'],['DE','Germany']]
+  .map(([countryCode, name]) => ({countryCode, name}));
+const pad = n => String(n).padStart(2, '0');
+const iso = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+let days = [], plans = [], sel = 0, holidays = [];
+
+/* Level 5: remember the last choice in Web Storage */
+const save = () => { try { localStorage.setItem('hlp', JSON.stringify({cc: $('cc').value, y: $('yr').value, k: $('k').value, d: $('dest').value, b: $('base').value})); } catch (e) {} };
+const restore = () => { try { return JSON.parse(localStorage.getItem('hlp')) || {}; } catch (e) { return {}; } };
+
+/* Level 3: fetch data from the open API */
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function init() {
+  let list;
+  try { list = await getJSON(API + 'AvailableCountries'); } catch (e) { list = FALLBACK; }
+  const opts = list.map(c => `<option value="${c.countryCode}">${c.name}</option>`).join('');
+  $('cc').innerHTML = opts; $('dest').innerHTML = opts;
+  if (list.some(c => c.countryCode === 'JP')) $('dest').value = 'JP';
+  const thisYear = new Date().getFullYear();
+  $('yr').innerHTML = [thisYear, thisYear + 1].map(y => `<option>${y}</option>`).join('');
+  const s = restore();
+  if (s.cc) $('cc').value = s.cc;
+  if (s.y) $('yr').value = s.y;
+  if (s.k !== undefined) $('k').value = s.k;
+  if (s.d) $('dest').value = s.d;
+  if (s.b) $('base').value = s.b;
+  const q = new URLSearchParams(location.search);
+  if (q.get('cc')) $('cc').value = q.get('cc');
+  if (q.get('y')) $('yr').value = q.get('y');
+  if (q.get('k')) $('k').value = q.get('k');
+  await initFx();
+  run();
+}
+
+/* Levels 1-2: one entry per day of the year; weekends and holidays are "off" days */
+function buildDays(y, hmap) {
+  const a = [];
+  for (let d = new Date(y, 0, 1); d.getFullYear() === y; d.setDate(d.getDate() + 1)) {
+    const dt = new Date(d), w = dt.getDay(), h = hmap[iso(dt)];
+    a.push({dt, iso: iso(dt), h, off: w === 0 || w === 6 || !!h});
+  }
+  return a;
+}
+
+/* Level 4: sliding window = longest run of off days that needs at most k leave days */
+function plan(k) {
+  const n = days.length, seen = new Set(), c = [];
+  let l = 0, used = 0;
+  for (let r = 0; r < n; r++) {
+    if (!days[r].off) used++;
+    while (used > k) { if (!days[l].off) used--; l++; }
+    const a = l, b = r;
+    if (b - a + 1 < 3 || seen.has(a + '-' + b)) continue;
+    seen.add(a + '-' + b);
+    const seg = days.slice(a, b + 1);
+    if (!seg.some(x => x.h)) continue;
+    c.push({a, b, len: seg.length, leave: seg.filter(x => !x.off).map(x => x.iso)});
+  }
+  c.sort((p, q) => q.len - p.len || p.leave.length - q.leave.length);
+  const out = [];
+  for (const p of c) {
+    if (out.every(o => p.b < o.a || p.a > o.b)) out.push(p);
+    if (out.length === 5) break;
+  }
+  return out;
+}
+
+async function run(e) {
+  if (e) e.preventDefault();
+  const cc = $('cc').value, y = +$('yr').value, k = Math.max(0, Math.min(10, +$('k').value || 0));
+  save();
+  $('status').textContent = 'Loading...';
+  let list;
+  try {
+    list = await getJSON(`${API}PublicHolidays/${y}/${cc}`);
+    $('status').textContent = `${list.length} public holidays loaded for ${cc} ${y}.`;
+  } catch (err) {
+    list = [{date: y + '-01-01', name: 'New Year (sample)', localName: 'New Year (sample)'}, {date: y + '-12-25', name: 'Christmas (sample)', localName: 'Christmas (sample)'}];
+    $('status').textContent = `Could not reach Nager.Date (${err.message}). Showing sample data only.`;
+  }
+  holidays = list.filter(h => h.global !== false);
+  const hmap = {};
+  holidays.forEach(h => { hmap[h.date] = h.localName === h.name ? h.name : `${h.name} (${h.localName})`; });
+  days = buildDays(y, hmap);
+  plans = plan(k);
+  sel = 0;
+  render();
+}
+
+const fmt = d => d.dt.toLocaleDateString('en', {month: 'short', day: 'numeric'});
+
+function render() {
+  const win = plans[sel], leaveSet = new Set(win ? win.leave : []);
+  const cal = $('cal'); cal.textContent = '';
+  const grids = [];
+  for (let m = 0; m < 12; m++) {
+    const box = document.createElement('div'); box.className = 'month';
+    const h = document.createElement('h3'); h.textContent = new Date(2000, m, 1).toLocaleString('en', {month: 'long'});
+    const g = document.createElement('div'); g.className = 'days';
+    'SMTWTFS'.split('').forEach(x => { const s = document.createElement('span'); s.className = 'dow'; s.textContent = x; g.append(s); });
+    box.append(h, g); cal.append(box); grids.push(g);
+  }
+  days.forEach((d, i) => {
+    const g = grids[d.dt.getMonth()];
+    if (d.dt.getDate() === 1) for (let b = 0; b < d.dt.getDay(); b++) g.append(document.createElement('span'));
+    const s = document.createElement('span');
+    s.textContent = d.dt.getDate();
+    s.title = d.h || d.iso;
+    if (d.h) s.classList.add('hol'); else if (d.off) s.classList.add('we');
+    if (win && i >= win.a && i <= win.b) s.classList.add('win');
+    if (leaveSet.has(d.iso)) s.classList.add('lv');
+    g.append(s);
+  });
+  const ol = $('plans'); ol.textContent = '';
+  if (!plans.length) ol.textContent = 'No break found. Try more leave days.';
+  plans.forEach((p, i) => {
+    const li = document.createElement('li'), b = document.createElement('button');
+    b.type = 'button'; b.className = 'rb' + (i === sel ? ' on' : '');
+    const lab = document.createElement('div'); lab.className = 'lab'; lab.textContent = `${fmt(days[p.a])} to ${fmt(days[p.b])}`;
+    const sub = document.createElement('small'); sub.textContent = `${p.len} days off, ${p.leave.length} leave day(s)`; lab.append(sub);
+    const strip = document.createElement('div'); strip.className = 'strip';
+    for (let j = Math.max(0, p.a - 1); j <= Math.min(days.length - 1, p.b + 1); j++) {
+      const d = days[j], c = document.createElement('span');
+      c.className = 'rd ' + (j < p.a || j > p.b ? 'ctx' : d.h ? 'hol' : !d.off ? 'lv' : 'we');
+      c.title = d.h || d.iso;
+      c.append('SMTWTFS'[d.dt.getDay()], document.createElement('br'), d.dt.getDate());
+      strip.append(c);
+    }
+    const sc = document.createElement('div'); sc.className = 'sc';
+    sc.textContent = p.leave.length ? (p.len / p.leave.length).toFixed(1).replace('.0', '') + 'x' : 'free';
+    const cap = document.createElement('small'); cap.textContent = 'days off per leave day'; sc.append(cap);
+    b.append(lab, strip, sc);
+    b.onclick = () => { sel = i; render(); };
+    li.append(b); ol.append(li);
+  });
+  drawChart();
+  updateTrip();
+}
+
+/* Level 5: Canvas bar chart of holidays per month */
+function drawChart() {
+  const cv = $('chart'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const counts = Array(12).fill(0);
+  holidays.forEach(h => counts[+h.date.slice(5, 7) - 1]++);
+  const max = Math.max(1, ...counts), bw = (W - 40) / 12;
+  ctx.clearRect(0, 0, W, H);
+  ctx.font = '12px system-ui'; ctx.textAlign = 'center';
+  counts.forEach((c, m) => {
+    const h = (H - 50) * c / max, x = 20 + m * bw;
+    ctx.fillStyle = '#0f766e'; ctx.fillRect(x + 6, H - 30 - h, bw - 12, h);
+    ctx.fillStyle = '#1b2733';
+    ctx.fillText(c, x + bw / 2, H - 34 - h);
+    ctx.fillText('JFMAMJJASOND'[m], x + bw / 2, H - 10);
+  });
+}
+
+/* Plan the trip: Frankfurter currency conversion (optional API) */
+const FX = 'https://api.frankfurter.dev/v1/';
+async function initFx() {
+  let cur;
+  try { cur = await getJSON(FX + 'currencies'); } catch (e) { cur = {USD: 'US Dollar', EUR: 'Euro', KRW: 'South Korean Won', IDR: 'Indonesian Rupiah', JPY: 'Japanese Yen'}; }
+  const o = Object.entries(cur).map(([c, n]) => `<option value="${c}">${c} - ${n}</option>`).join('');
+  $('c1').innerHTML = o; $('c2').innerHTML = o;
+  const keys = Object.keys(cur);
+  $('c1').value = keys.includes('USD') ? 'USD' : keys[0];
+  $('c2').value = keys.includes('EUR') ? 'EUR' : keys[1];
+  ['bd', 'c1', 'c2', 'dest', 'base'].forEach(id => $(id).addEventListener('change', () => { save(); updateTrip(); }));
+}
+let tripSeq = 0;
+async function updateTrip() {
+  const p = plans[sel]; $('trip').hidden = !p; if (!p) return;
+  const my = ++tripSeq, bd = +$('bd').value || 0, amt = bd * p.len, a = $('c1').value, b = $('c2').value;
+  $('tot').textContent = `Trip budget: ${amt.toLocaleString()} ${a} for ${p.len} days`;
+  if (a !== b) {
+    try {
+      const r = await getJSON(`${FX}latest?base=${a}&symbols=${b}`);
+      if (my === tripSeq) $('tot').textContent += ` = ${(amt * r.rates[b]).toLocaleString(undefined, {maximumFractionDigits: 2})} ${b} (rate date ${r.date})`;
+    } catch (e) { if (my === tripSeq) $('tot').textContent += ' (currency conversion unavailable)'; }
+  }
+  budgetCheck(my, bd, a);
+}
+
+/* Budget check (World Bank): price level = PPP conversion factor / official exchange rate.
+   PA.NUS.PPPC.RF (the ready-made ratio) is archived in the API, so the ratio is computed from two live series. */
+const WB = 'https://api.worldbank.org/v2/country/';
+const plCache = {};
+async function priceLevel(cc) {
+  if (plCache[cc]) return plCache[cc];
+  const one = async ind => {
+    const j = await getJSON(`${WB}${cc}/indicator/${ind}?format=json&mrnev=1`);
+    const row = Array.isArray(j) && Array.isArray(j[1]) ? j[1][0] : null;
+    if (!row || row.value == null) throw new Error('no World Bank data for ' + cc);
+    return row;
+  };
+  const [ppp, fx] = await Promise.all([one('PA.NUS.PPP'), one('PA.NUS.FCRF')]);
+  return plCache[cc] = {ratio: ppp.value / fx.value, year: ppp.date === fx.date ? ppp.date : `${ppp.date}/${fx.date}`};
+}
+async function budgetCheck(my, bd, cur) {
+  const el = $('chk'), dest = $('dest').value, base = +$('base').value || 0;
+  if (!base) { el.textContent = 'Budget check: enter a baseline cost per day.'; return; }
+  el.textContent = 'Budget check: loading...';
+  try {
+    const [pl, rate] = await Promise.all([priceLevel(dest), cur === 'USD' ? 1 : getJSON(`${FX}latest?base=${cur}&symbols=USD`).then(x => x.rates.USD)]);
+    if (my !== tripSeq) return;
+    const need = base * pl.ratio, have = bd * rate, q = have / need;
+    const [cls, word] = q < 0.8 ? ['tight', 'Tight'] : q <= 1.2 ? ['ok', 'About right'] : ['loose', 'Comfortable'];
+    el.textContent = '';
+    const badge = document.createElement('span'); badge.className = 'badge ' + cls; badge.textContent = word;
+    const small = document.createElement('small');
+    small.textContent = 'Rough estimate, not financial advice. Based on the country-wide price level, not tourist prices.';
+    el.append("Budget check: ", badge, ` Your budget is about ${have.toFixed(0)} USD/day; the estimated need in ${$('dest').selectedOptions[0].text} is about ${need.toFixed(0)} USD/day (baseline ${base} USD x price level ${pl.ratio.toFixed(2)}, World Bank ${pl.year}).`, small);
+  } catch (e) {
+    if (my === tripSeq) el.textContent = `Budget check unavailable (${e.message}). No estimate is shown.`;
+  }
+}
+
+/* Save or share: .ics calendar file and share link */
+$('ics').onclick = () => {
+  const p = plans[sel]; if (!p) return;
+  const f = d => d.iso.replace(/-/g, ''), nxt = d => { const x = new Date(d.dt); x.setDate(x.getDate() + 1); return iso(x).replace(/-/g, ''); };
+  const stamp = new Date().toISOString().replace(/[-:]|\.\d+/g, '');
+  const ev = (d0, d1, sum, desc) => ['BEGIN:VEVENT', `UID:${f(d0)}-${sum.length}@holiday-planner`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${f(d0)}`, `DTEND;VALUE=DATE:${nxt(d1)}`, `SUMMARY:${sum}`, `DESCRIPTION:${desc}`, 'END:VEVENT'];
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Holiday Planner//EN', ...ev(days[p.a], days[p.b], `Break: ${p.len} days off`, `Uses ${p.leave.length} leave day(s)`)];
+  p.leave.forEach(s => { const d = days.find(x => x.iso === s); lines.push(...ev(d, d, 'Take leave', 'Leave day for the planned break')); });
+  lines.push('END:VCALENDAR');
+  const url = URL.createObjectURL(new Blob([lines.join('\r\n')], {type: 'text/calendar'}));
+  const l = document.createElement('a'); l.href = url; l.download = 'break.ics'; l.click(); URL.revokeObjectURL(url);
+};
+$('sh').onclick = async () => {
+  const u = new URL(location.href);
+  u.search = new URLSearchParams({cc: $('cc').value, y: $('yr').value, k: $('k').value}).toString();
+  try { await navigator.clipboard.writeText(u.href); $('status').textContent = 'Share link copied.'; } catch (e) { prompt('Copy this link:', u.href); }
+};
+
+$('f').addEventListener('submit', run);
+$('tf').addEventListener('submit', e => e.preventDefault());
+init();
+</script>
+</body>
+</html>
